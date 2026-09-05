@@ -1,6 +1,9 @@
 "use client";
+
+export const dynamic = 'force-dynamic';
+
 import { useState } from "react";
-import { db, auth } from "../../lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 
@@ -12,14 +15,18 @@ export default function Dashboard() {
     if (!title) return;
     const user = auth.currentUser;
     
-    const docRef = await addDoc(collection(db, "classes"), {
-      title,
-      teacherId: user?.uid || "teacher_1",
-      status: "live",
-      createdAt: serverTimestamp(),
-    });
+    try {
+      const docRef = await addDoc(collection(db, "classes"), {
+        title,
+        teacherId: user?.uid || "guest_teacher",
+        status: "live",
+        createdAt: serverTimestamp(),
+      });
 
-    router.push(`/class/${docRef.id}?role=teacher`);
+      router.push(`/class/${docRef.id}?role=teacher`);
+    } catch (error) {
+      console.error("Error creating class:", error);
+    }
   };
 
   return (
