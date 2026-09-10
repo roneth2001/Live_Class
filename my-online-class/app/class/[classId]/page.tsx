@@ -23,6 +23,7 @@ export default function ClassRoom() {
   const [screenTrack, setScreenTrack] = useState<any>(null);
 
   const localVideoRef = useRef<HTMLDivElement>(null);
+  const mainVideoRef = useRef<HTMLDivElement>(null);
   const shareableLink = typeof window !== "undefined" ? `${window.location.origin}/class/${classId}` : "";
 
   useEffect(() => {
@@ -101,6 +102,27 @@ export default function ClassRoom() {
       client?.leave?.().catch(() => undefined);
     };
   }, [classId]);
+
+  // For students: play the first available remote video (teacher/screen) in the main view
+  useEffect(() => {
+    if (isTeacher) return;
+    const node = mainVideoRef.current;
+    if (!node) return;
+
+    const presenter = remoteUsers.find((u) => !!u.videoTrack);
+    if (presenter && presenter.videoTrack) {
+      try {
+        presenter.videoTrack.play(node);
+      } catch (e) {
+        // ignore play errors (race conditions)
+      }
+    }
+
+    return () => {
+      // clear node when presenter changes or component unmounts
+      if (node) node.innerHTML = "";
+    };
+  }, [remoteUsers, isTeacher]);
 
   const toggleMute = () => {
     if (localTracks) {
@@ -214,7 +236,7 @@ export default function ClassRoom() {
         </div>
 
         <div className="flex-1 relative bg-black rounded-lg overflow-hidden border border-gray-800">
-          <div ref={localVideoRef} className="w-full h-full object-cover" />
+            <div ref={isTeacher ? localVideoRef : mainVideoRef} className="w-full h-full object-cover" />
 
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-4 bg-gray-900/90 px-4 py-2 rounded-full border border-gray-700">
             <button 
