@@ -25,6 +25,7 @@ export default function ClassRoom() {
   const localVideoRef = useRef<HTMLDivElement>(null);
   const mainVideoRef = useRef<HTMLDivElement>(null);
   const shareableLink = typeof window !== "undefined" ? `${window.location.origin}/class/${classId}` : "";
+  const mainPresenter = !isTeacher ? remoteUsers.find((user) => !!user.videoTrack) ?? remoteUsers[0] : null;
 
   useEffect(() => {
     let isActive = true;
@@ -109,7 +110,7 @@ export default function ClassRoom() {
     const node = mainVideoRef.current;
     if (!node) return;
 
-    const presenter = remoteUsers.find((u) => !!u.videoTrack);
+    const presenter = mainPresenter;
     if (presenter && presenter.videoTrack) {
       try {
         presenter.videoTrack.play(node);
@@ -144,6 +145,11 @@ export default function ClassRoom() {
     const client = clientRef.current;
     if (!localTracks || !isTeacher || !client) return;
 
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      alert("This browser does not support screen sharing. Please use Chrome, Edge, or another browser with screen-capture support.");
+      return;
+    }
+
     if (isScreenSharing && screenTrack) {
       await client.unpublish(screenTrack);
       screenTrack.close();
@@ -158,21 +164,26 @@ export default function ClassRoom() {
       return;
     }
 
-    const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
-    await client.unpublish(localTracks[1]);
-    localTracks[1].setEnabled(false);
-    setCameraEnabled(false);
+    try {
+      const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
+      await client.unpublish(localTracks[1]);
+      localTracks[1].setEnabled(false);
+      setCameraEnabled(false);
 
-    const shareTrack = await AgoraRTC.createScreenVideoTrack({ encoderConfig: "1080p_1" }, "auto");
-    const finalTrack = Array.isArray(shareTrack) ? shareTrack[0] : shareTrack;
+      const shareTrack = await AgoraRTC.createScreenVideoTrack({ encoderConfig: "1080p_1" }, "auto");
+      const finalTrack = Array.isArray(shareTrack) ? shareTrack[0] : shareTrack;
 
-    if (finalTrack && localVideoRef.current) {
-      finalTrack.play(localVideoRef.current);
+      if (finalTrack && localVideoRef.current) {
+        finalTrack.play(localVideoRef.current);
+      }
+
+      await client.publish(finalTrack);
+      setScreenTrack(finalTrack);
+      setIsScreenSharing(true);
+    } catch (error) {
+      console.error("Screen share failed:", error);
+      alert("Screen sharing was blocked or cancelled. Please allow screen capture permission and try again.");
     }
-
-    await client.publish(finalTrack);
-    setScreenTrack(finalTrack);
-    setIsScreenSharing(true);
   };
 
   const endClass = async () => {
@@ -195,23 +206,23 @@ export default function ClassRoom() {
 
   return (
     <div className="flex h-screen bg-gray-950 text-white">
-      <div className="flex-1 flex flex-col p-4">
-        <div className="mb-4 flex justify-between items-center bg-gray-900 p-3 rounded-lg border border-gray-800 gap-3">
-          <span className="font-semibold text-sm">{isTeacher ? "Teacher View" : "Student View"}</span>
-          <div className="flex gap-2 flex-wrap justify-end">
-            <input 
-              readOnly 
-              value={shareableLink} 
-              className="bg-gray-800 text-xs p-2 rounded w-64 text-gray-300 border border-gray-700" 
-            />
-            <button 
-              onClick={() => navigator.clipboard.writeText(shareableLink)}
-              className="bg-blue-600 hover:bg-blue-700 text-xs px-3 py-1 rounded font-medium transition"
-            >
-              Copy Link
-            </button>
-            {isTeacher && (
-              <>
+      {isTeacher ? (
+        <>
+          <div className="flex-1 flex flex-col p-4">
+            <div className="mb-4 flex justify-between items-center bg-gray-900 p-3 rounded-lg border border-gray-800 gap-3">
+              <span className="font-semibold text-sm">Teacher View</span>
+              <div className="flex gap-2 flex-wrap justify-end">
+                <input 
+                  readOnly 
+                  value={shareableLink} 
+                  className="bg-gray-800 text-xs p-2 rounded w-64 text-gray-300 border border-gray-700" 
+                />
+                <button 
+                  onClick={() => navigator.clipboard.writeText(shareableLink)}
+                  className="bg-blue-600 hover:bg-blue-700 text-xs px-3 py-1 rounded font-medium transition"
+                >
+                  Copy Link
+                </button>
                 <button
                   onClick={toggleScreenShare}
                   className="bg-violet-600 hover:bg-violet-700 text-xs px-3 py-1 rounded font-medium transition"
@@ -230,47 +241,66 @@ export default function ClassRoom() {
                 >
                   Finish Class
                 </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="flex-1 relative bg-black rounded-lg overflow-hidden border border-gray-800">
-            <div ref={isTeacher ? localVideoRef : mainVideoRef} className="w-full h-full object-cover" />
-
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-4 bg-gray-900/90 px-4 py-2 rounded-full border border-gray-700">
-            <button 
-              onClick={toggleMute}
-              className={`px-4 py-1.5 rounded-full text-xs font-semibold ${isMuted ? "bg-red-600" : "bg-gray-700 hover:bg-gray-600"}`}
-            >
-              {isMuted ? "Unmute Mic" : "Mute Mic"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="w-80 border-l border-gray-800 p-4 bg-gray-900 overflow-y-auto">
-        <h3 className="text-xs font-semibold mb-4 text-gray-400 uppercase tracking-wider">
-          Joined Students ({remoteUsers.length})
-        </h3>
-
-        <div className="flex flex-col gap-3">
-          {remoteUsers.map((user) => (
-            <div 
-              key={user.uid} 
-              id={`user-${user.uid}`} 
-              className="h-40 bg-gray-950 rounded-lg overflow-hidden relative border border-gray-800"
-              ref={(node) => {
-                if (node && user.videoTrack) user.videoTrack.play(node);
-              }}
-            >
-              <span className="absolute bottom-2 left-2 text-[10px] bg-black/70 px-2 py-0.5 rounded text-gray-300">
-                User: {user.uid}
-              </span>
+              </div>
             </div>
-          ))}
+
+            <div className="flex-1 relative bg-black rounded-lg overflow-hidden border border-gray-800">
+              <div ref={localVideoRef} className="w-full h-full object-cover" />
+
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-4 bg-gray-900/90 px-4 py-2 rounded-full border border-gray-700">
+                <button 
+                  onClick={toggleMute}
+                  className={`px-4 py-1.5 rounded-full text-xs font-semibold ${isMuted ? "bg-red-600" : "bg-gray-700 hover:bg-gray-600"}`}
+                >
+                  {isMuted ? "Unmute Mic" : "Mute Mic"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="w-80 border-l border-gray-800 p-4 bg-gray-900 overflow-y-auto">
+            <h3 className="text-xs font-semibold mb-4 text-gray-400 uppercase tracking-wider">
+              Joined Students ({remoteUsers.length})
+            </h3>
+
+            <div className="flex flex-col gap-3">
+              {remoteUsers.map((user) => (
+                <div 
+                  key={user.uid} 
+                  id={`user-${user.uid}`} 
+                  className="h-40 bg-gray-950 rounded-lg overflow-hidden relative border border-gray-800"
+                  ref={(node) => {
+                    if (node && user.videoTrack) user.videoTrack.play(node);
+                  }}
+                >
+                  <span className="absolute bottom-2 left-2 text-[10px] bg-black/70 px-2 py-0.5 rounded text-gray-300">
+                    User: {user.uid}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 flex flex-col p-4">
+          <div className="mb-4 flex justify-between items-center bg-gray-900 p-3 rounded-lg border border-gray-800 gap-3">
+            <span className="font-semibold text-sm">Student View</span>
+          </div>
+
+          <div className="flex-1 relative bg-black rounded-lg overflow-hidden border border-gray-800">
+            <div ref={mainVideoRef} className="w-full h-full object-cover" />
+
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-4 bg-gray-900/90 px-4 py-2 rounded-full border border-gray-700">
+              <button 
+                onClick={toggleMute}
+                className={`px-4 py-1.5 rounded-full text-xs font-semibold ${isMuted ? "bg-red-600" : "bg-gray-700 hover:bg-gray-600"}`}
+              >
+                {isMuted ? "Unmute Mic" : "Mute Mic"}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
